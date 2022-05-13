@@ -3,7 +3,7 @@ name = "txtar"
 version = "0.1.0"
 edition = "2021"
 authors = ["Frank de Jong <f.jin@protonmail.com>"]
-description = "A Rust implementation of the [txtar](https://github.com/golang/tools/tree/master/txtar) Go package"
+description = "A Rust implementation of the txtar Go package"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 

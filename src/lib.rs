@@ -165,9 +165,45 @@ fn fix_newline(s: &mut Cow<'_, [u8]>) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use similar_asserts::{assert_eq, assert_str_eq};
+
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn parse_format() {
+        let basic = "\
+comment1
+comment2
+-- file1 --
+File 1 text.
+-- foo --
+File 2 text.
+-- empty --
+-- noNL --
+hello world";
+        let expected = format!("{basic}\n");
+
+        let arch = Archive::from(basic);
+        let txtar = arch.to_string();
+        assert_str_eq!(
+            txtar,
+            expected,
+            "parse[basic]: result did not match the expected output"
+        );
+
+        // Test CRLF input
+        let crlf = "blah\r\n-- hello --\r\nhello\r\n";
+        let expected = Archive {
+            comment: Cow::Borrowed(b"blah\r\n"),
+            files: vec![File {
+                name: b"hello",
+                data: Cow::Borrowed(b"hello\r\n"),
+            }],
+        };
+
+        let arch = Archive::from(crlf);
+        assert_eq!(
+            arch, expected,
+            "parse[CRLF input]: result did not match the expected output",
+        );
     }
 }

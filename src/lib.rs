@@ -3,11 +3,17 @@
 use std::{
     borrow::Cow,
     fmt::Display,
-    io::{self, Write},
+    fs,
+    io::{self, BufWriter, Write},
+    path::{Path, PathBuf},
 };
+
+mod error;
 
 const NEWLINE_MARKER: &str = "\n-- ";
 const NEWLINE_MARKER_END: &str = " --\n";
+
+pub use error::MaterializeError;
 
 pub struct Archive<'a> {
     comment: &'a str,
@@ -20,9 +26,47 @@ pub struct File<'a> {
 }
 
 impl<'a> Archive<'a> {
-    /// Serialize the archive as txtar into the IO stream.
+    /// Serialize the archive as txtar into the I/O stream.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         write!(writer, "{}", self)
+    }
+
+    /// Writes each file in this archive to the directory at the given
+    /// path.
+    ///
+    /// # Errors
+    ///
+    /// This function will error in the event a file would be written
+    /// outside of the directory or if an existing file would be
+    /// overwritten. Additionally, any errors caused by the underlying
+    /// I/O operations will be propagated.
+    pub fn materialize<P: AsRef<Path>>(&self, path: P) -> Result<(), MaterializeError> {
+        let path = path.as_ref();
+        for File { name, data } in &self.files {
+            let name_path = PathBuf::from(path_clean::clean(name));
+            if name_path.starts_with("../") || name_path.is_absolute() {
+                return Err(MaterializeError::DirEscape(
+                    name_path.to_string_lossy().to_string(),
+                ));
+            }
+
+            let rel_path = name_path;
+            let path = path.join(rel_path);
+            if let Some(p) = path.parent() {
+                fs::create_dir_all(p)?;
+            }
+
+            let mut data = Cow::Borrowed(*data);
+            fix_newline(&mut data);
+            let mut file = fs::File::options()
+                .write(true)
+                .create_new(true)
+                .open(path)?;
+            let mut w = BufWriter::new(&mut file);
+            w.write_all(data.as_bytes())?;
+        }
+
+        Ok(())
     }
 }
 

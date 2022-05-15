@@ -1,6 +1,28 @@
 # txtar
 A Rust implementation of the [txtar](https://github.com/golang/tools/tree/master/txtar) Go package.
 
+```toml
+[dependencies]
+txtar = 0.2.0
+```
+
+## Example
+```rust no_run
+let txt = "\
+comment1
+comment2
+-- file1 --
+File 1 text.
+-- foo/bar --
+File 2 text.
+-- empty --
+-- noNL --
+hello world";
+
+let archive = txtar::from_str(txt);
+archive.materialize("/tmp/somedir/").unwrap();
+```
+
 ## Txtar goals
 As described in the Go package:
 

@@ -1,52 +1,46 @@
 #![doc=include_str!("../README.md")]
 
 use std::{
-    borrow::Cow,
     fmt::Display,
     fs,
     io::{self, BufWriter, Write},
     path::{Path, PathBuf},
+    str,
 };
 
 mod error;
 
-const NEWLINE_MARKER: &str = "\n-- ";
-const MARKER: &str = "-- ";
-const MARKER_END: &str = " --";
-
 pub use error::MaterializeError;
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct Archive<'a> {
+pub struct Archive {
     // internal invariant:
     // comment is fix_newlined
-    comment: Cow<'a, [u8]>,
-    files: Vec<File<'a>>,
+    comment: String,
+    files: Vec<File>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct File<'a> {
-    name: &'a [u8],
+pub struct File {
+    name: PathBuf,
     // internal invariant:
     // data is fix_newlined
-    data: Cow<'a, [u8]>,
+    data: String,
 }
 
-impl<'a> File<'a> {
-    pub fn new(name: &'a str, data: &'a str) -> File<'a> {
-        let mut data = Cow::Borrowed(data.as_bytes());
+impl File {
+    pub fn new<P: AsRef<Path>>(name: P, data: &str) -> File {
+        let name = name.as_ref().to_owned();
+        let mut data = data.to_owned();
         fix_newline(&mut data);
 
-        File {
-            name: name.as_bytes(),
-            data,
-        }
+        File { name, data }
     }
 }
 
-impl<'a> Archive<'a> {
-    fn new(comment: &'a str, files: Vec<File<'a>>) -> Archive<'a> {
-        let mut comment = Cow::Borrowed(comment.as_bytes());
+impl Archive {
+    fn new(comment: &str, files: Vec<File>) -> Archive {
+        let mut comment = comment.to_owned();
         fix_newline(&mut comment);
 
         Archive { comment, files }
@@ -54,12 +48,7 @@ impl<'a> Archive<'a> {
 
     /// Serialize the archive as txtar into the I/O stream.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write_all(&self.comment)?;
-        for File { name, data } in &self.files {
-            writer.write_all(name)?;
-            writer.write_all(data)?;
-        }
-        Ok(())
+        write!(writer, "{}", self)
     }
 
     /// Writes each file in this archive to the directory at the given
@@ -75,7 +64,7 @@ impl<'a> Archive<'a> {
         let path = path.as_ref();
         for File { name, data } in &self.files {
             // this is disgusting, TODO
-            let name_path = PathBuf::from(path_clean::clean(&String::from_utf8_lossy(name)));
+            let name_path = PathBuf::from(path_clean::clean(&name.display().to_string()));
             if name_path.starts_with("../") || name_path.is_absolute() {
                 return Err(MaterializeError::DirEscape(
                     name_path.to_string_lossy().to_string(),
@@ -93,15 +82,38 @@ impl<'a> Archive<'a> {
                 .create_new(true)
                 .open(path)?;
             let mut w = BufWriter::new(&mut file);
-            w.write_all(data)?;
+            w.write_all(data.as_bytes())?;
         }
 
         Ok(())
     }
 }
 
-impl<'a> From<&'a str> for Archive<'a> {
-    fn from(s: &'a str) -> Archive<'a> {
+impl Display for Archive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.comment)?;
+
+        for File { name, data } in &self.files {
+            let name = name.display();
+            writeln!(f, "-- {name} --")?;
+            write!(f, "{data}")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<&[u8]> for Archive {
+    type Error = std::str::Utf8Error;
+
+    fn try_from(slice: &[u8]) -> Result<Self, Self::Error> {
+        let s = str::from_utf8(slice)?;
+        Ok(Archive::from(s))
+    }
+}
+
+impl From<&str> for Archive {
+    fn from(s: &str) -> Archive {
         let (comment, mut name, mut s) = split_file_markers(s);
         let mut files = Vec::new();
 
@@ -119,7 +131,21 @@ impl<'a> From<&'a str> for Archive<'a> {
     }
 }
 
+/// Read an archive from a string of txtar data.
+pub fn from_str(s: &str) -> Archive {
+    Archive::from(s)
+}
+
+/// Try to read an archive from bytes of txtar data.
+pub fn from_bytes(slice: &[u8]) -> Result<Archive, std::str::Utf8Error> {
+    Archive::try_from(slice)
+}
+
 fn split_file_markers(s: &str) -> (&str, &str, &str) {
+    const NEWLINE_MARKER: &str = "\n-- ";
+    const MARKER: &str = "-- ";
+    const MARKER_END: &str = " --";
+
     let (prefix, rest) = if s.starts_with(MARKER) {
         ("", s)
     } else {
@@ -130,41 +156,26 @@ fn split_file_markers(s: &str) -> (&str, &str, &str) {
     };
     debug_assert!(rest.starts_with(MARKER));
 
-    let (name, suffix) = match rest.split_once('\n') {
+    let (filename, suffix) = match rest.split_once('\n') {
         None if rest.ends_with(MARKER_END) => (rest, ""),
         None => return (s, "", ""),
         Some((n, pf)) => (n, pf),
     };
 
-    let name = name.trim_end_matches('\r');
-    debug_assert!(name.ends_with(MARKER_END));
+    let filename = filename.trim_end_matches('\r');
+    debug_assert!(filename.ends_with(MARKER_END));
 
-    let name = name
+    let filename = filename
         .strip_prefix(MARKER)
-        .and_then(|name| name.strip_suffix(MARKER_END))
-        .unwrap();
-    (prefix, name, suffix)
+        .and_then(|filename| filename.strip_suffix(MARKER_END))
+        .unwrap()
+        .trim();
+    (prefix, filename, suffix)
 }
 
-impl<'a> Display for Archive<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let comment = String::from_utf8_lossy(&self.comment);
-        write!(f, "{comment}")?;
-
-        for File { name, data } in &self.files {
-            let name = String::from_utf8_lossy(name);
-            writeln!(f, "-- {name} --")?;
-            let data = String::from_utf8_lossy(data);
-            write!(f, "{data}")?;
-        }
-
-        Ok(())
-    }
-}
-
-fn fix_newline(s: &mut Cow<'_, [u8]>) {
-    if !s.is_empty() && !s.ends_with(&[b'\n']) {
-        s.to_mut().push(b'\n');
+fn fix_newline(s: &mut String) {
+    if !s.is_empty() && !s.ends_with('\n') {
+        s.push('\n');
     }
 }
 
@@ -192,33 +203,36 @@ hello world";
         {
             let simplest = "-- simplest.txt --";
             let expected = format!("{simplest}\n");
-            check_parse_format("simplest", Archive::from(simplest), &expected);
+            check_parse_format("simplest", simplest, &expected);
         }
 
         // Test basic variety of inputs
         {
             let basic = BASIC;
             let expected = format!("{basic}\n");
-            check_parse_format("basic", Archive::from(basic), &expected);
+            check_parse_format("basic", basic, &expected);
         }
 
         // Test CRLF input
         {
             let crlf = "blah\r\n-- hello --\r\nhello\r\n";
-            let expected = Archive {
-                comment: Cow::Borrowed(b"blah\r\n"),
-                files: vec![File {
-                    name: b"hello",
-                    data: Cow::Borrowed(b"hello\r\n"),
-                }],
-            };
+            let expected = "\
+Archive { comment: \"blah\\r\\n\", files: [File { name: \"hello\", data: \"hello\\r\\n\" }] }";
 
-            let arch = Archive::from(crlf);
-            assert_eq!(arch, expected, "parse[CRLF input]",);
+            let arch = format!("{:?}", Archive::from(crlf));
+            assert_str_eq!(&arch, expected, "parse[CRLF input]",);
+        }
+
+        // Test whitespace handling
+        {
+            let txtar = "--  a  --";
+            let expected = "-- a --\n";
+            check_parse_format("whitespace", txtar, expected)
         }
     }
 
-    fn check_parse_format(name: &str, arch: Archive, expected: &str) {
+    fn check_parse_format(name: &str, txtar: &str, expected: &str) {
+        let arch = Archive::from(txtar);
         let txtar = arch.to_string();
         assert_str_eq!(txtar, expected, "parse[{name}]");
     }

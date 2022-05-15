@@ -1,5 +1,7 @@
 #![doc=include_str!("../README.md")]
 
+mod error;
+
 use std::{
     fmt::Display,
     fs,
@@ -8,9 +10,8 @@ use std::{
     str,
 };
 
-mod error;
-
 pub use error::MaterializeError;
+use path_clean::PathClean;
 
 /**
 An archive represents a tree of text files.
@@ -89,8 +90,7 @@ impl Archive {
     pub fn materialize<P: AsRef<Path>>(&self, path: P) -> Result<(), MaterializeError> {
         let path = path.as_ref();
         for File { name, data } in &self.files {
-            // this is disgusting, TODO
-            let name_path = PathBuf::from(path_clean::clean(&name.display().to_string()));
+            let name_path = name.clean();
             if name_path.starts_with("../") || name_path.is_absolute() {
                 return Err(MaterializeError::DirEscape(
                     name_path.to_string_lossy().to_string(),

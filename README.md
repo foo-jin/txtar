@@ -1,9 +1,8 @@
 # txtar
 A Rust implementation of the [txtar](https://github.com/golang/tools/tree/master/txtar) Go package.
 
-```toml
-[dependencies]
-txtar = 0.2.2
+```
+cargo add txtar
 ```
 
 ## Example

@@ -12,7 +12,33 @@ mod error;
 
 pub use error::MaterializeError;
 
-#[derive(Debug, Eq, PartialEq)]
+/**
+An archive represents a tree of text files.
+
+This type is used to read txtar files from disk and materialize the
+corresponding file layout.
+
+# Examples
+
+```rust no_run
+use txtar::Archive;
+
+let txt = "\
+comment1
+comment2
+-- file1 --
+File 1 text.
+-- foo --
+File 2 text.
+-- empty --
+-- noNL --
+hello world";
+
+let archive = Archive::from(txt);
+archive.materialize("/tmp/somedir/").unwrap();
+```
+**/
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct Archive {
     // internal invariant:
     // comment is fix_newlined

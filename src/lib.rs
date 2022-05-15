@@ -21,7 +21,7 @@ pub struct Archive {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct File {
+struct File {
     name: PathBuf,
     // internal invariant:
     // data is fix_newlined

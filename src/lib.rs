@@ -120,13 +120,18 @@ impl<'a> From<&'a str> for Archive<'a> {
 }
 
 fn split_file_markers(s: &str) -> (&str, &str, &str) {
-    let (prefix, rest) = match s.find(NEWLINE_MARKER) {
-        None => return (s, "", ""),
-        Some(offset) => s.split_at(offset + 1),
+    let (prefix, rest) = if s.starts_with(MARKER) {
+        ("", s)
+    } else {
+        match s.find(NEWLINE_MARKER) {
+            None => return (s, "", ""),
+            Some(offset) => s.split_at(offset + 1),
+        }
     };
     debug_assert!(rest.starts_with(MARKER));
 
-    let (name, postfix) = match rest.split_once('\n') {
+    let (name, suffix) = match rest.split_once('\n') {
+        None if rest.ends_with(MARKER_END) => (rest, ""),
         None => return (s, "", ""),
         Some((n, pf)) => (n, pf),
     };
@@ -138,7 +143,7 @@ fn split_file_markers(s: &str) -> (&str, &str, &str) {
         .strip_prefix(MARKER)
         .and_then(|name| name.strip_suffix(MARKER_END))
         .unwrap();
-    (prefix, name, postfix)
+    (prefix, name, suffix)
 }
 
 impl<'a> Display for Archive<'a> {
@@ -166,11 +171,11 @@ fn fix_newline(s: &mut Cow<'_, [u8]>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_fs::{prelude::*, TempDir};
+    use predicates::prelude::{predicate::str::contains, *};
     use similar_asserts::{assert_eq, assert_str_eq};
 
-    #[test]
-    fn parse_format() {
-        let basic = "\
+    const BASIC: &str = "\
 comment1
 comment2
 -- file1 --
@@ -180,30 +185,118 @@ File 2 text.
 -- empty --
 -- noNL --
 hello world";
-        let expected = format!("{basic}\n");
 
-        let arch = Archive::from(basic);
-        let txtar = arch.to_string();
-        assert_str_eq!(
-            txtar,
-            expected,
-            "parse[basic]: result did not match the expected output"
-        );
+    #[test]
+    fn parse_format() {
+        // Test simplest
+        {
+            let simplest = "-- simplest.txt --";
+            let expected = format!("{simplest}\n");
+            check_parse_format("simplest", Archive::from(simplest), &expected);
+        }
+
+        // Test basic variety of inputs
+        {
+            let basic = BASIC;
+            let expected = format!("{basic}\n");
+            check_parse_format("basic", Archive::from(basic), &expected);
+        }
 
         // Test CRLF input
-        let crlf = "blah\r\n-- hello --\r\nhello\r\n";
-        let expected = Archive {
-            comment: Cow::Borrowed(b"blah\r\n"),
-            files: vec![File {
-                name: b"hello",
-                data: Cow::Borrowed(b"hello\r\n"),
-            }],
-        };
+        {
+            let crlf = "blah\r\n-- hello --\r\nhello\r\n";
+            let expected = Archive {
+                comment: Cow::Borrowed(b"blah\r\n"),
+                files: vec![File {
+                    name: b"hello",
+                    data: Cow::Borrowed(b"hello\r\n"),
+                }],
+            };
 
-        let arch = Archive::from(crlf);
-        assert_eq!(
-            arch, expected,
-            "parse[CRLF input]: result did not match the expected output",
-        );
+            let arch = Archive::from(crlf);
+            assert_eq!(arch, expected, "parse[CRLF input]",);
+        }
+    }
+
+    fn check_parse_format(name: &str, arch: Archive, expected: &str) {
+        let txtar = arch.to_string();
+        assert_str_eq!(txtar, expected, "parse[{name}]");
+    }
+
+    #[test]
+    fn materialize_basic() {
+        let dir = TempDir::new().unwrap();
+        let exists = predicate::path::exists();
+        let empty = predicate::str::is_empty().from_utf8().from_file_path();
+        {
+            let good = dbg!(Archive::from("-- good.txt --"));
+            good.materialize(&dir)
+                .expect("good.materialize should not error");
+            dir.child("good.txt").assert(exists).assert(empty);
+        }
+        {
+            let basic = Archive::from(BASIC);
+            basic
+                .materialize(&dir)
+                .expect("basic.materialize should not error");
+
+            check_contents(&dir, "file1", "File 1 text.");
+            check_contents(&dir, "foo", "File 2 text.");
+            check_contents(&dir, "noNL", "hello world");
+            dir.child("empty").assert(exists).assert(empty);
+        }
+        {
+            let bad_rel = Archive::from("-- ../bad.txt --");
+            check_bad_materialize(&dir, bad_rel, "../bad.txt");
+
+            let bad_abs = Archive::from("-- /bad.txt --");
+            check_bad_materialize(&dir, bad_abs, "/bad.txt");
+        }
+    }
+
+    #[test]
+    fn materialize_nested() {
+        let dir = TempDir::new().unwrap();
+
+        {
+            let nested = Archive::from(
+                "comment\n\
+			 -- foo/foo.txt --\nThis is foo.\n\
+			 -- bar/bar.txt --\nThis is bar.\n\
+			 -- bar/deep/deeper/abyss.txt --\nThis is in the DEEPS.",
+            );
+            nested
+                .materialize(&dir)
+                .expect("nested.materialize should not error");
+
+            check_contents(&dir, "foo/foo.txt", "This is foo.");
+            check_contents(&dir, "bar/bar.txt", "This is bar.");
+            check_contents(&dir, "bar/deep/deeper/abyss.txt", "This is in the DEEPS.");
+        }
+        {
+            let bad_nested_rel = Archive::from("-- bar/deep/deeper/../../../../escaped.txt --");
+            check_bad_materialize(&dir, bad_nested_rel, "../escaped.txt");
+        }
+    }
+
+    fn check_contents(dir: &TempDir, child: &str, contents: &str) {
+        let exists = predicate::path::exists();
+        let newline_ending = predicate::str::ends_with("\n").from_utf8().from_file_path();
+        dir.child(child)
+            .assert(exists)
+            .assert(contains(contents))
+            .assert(newline_ending);
+    }
+
+    fn check_bad_materialize(dir: &TempDir, bad_rel: Archive, expected: &str) {
+        let err = bad_rel.materialize(dir);
+        match err {
+            Err(MaterializeError::DirEscape(p)) => assert_eq!(p, expected.to_string()),
+            Err(e) => panic!("expected `MaterializeError::DirEscape`, got {:?}", e),
+            Ok(_) => panic!(
+                "materialize({}) outside of parent dir should have failed",
+                expected
+            ),
+        }
     }
 }

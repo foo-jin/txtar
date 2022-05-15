@@ -1,6 +1,6 @@
 [package]
 name = "txtar"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 authors = ["Frank de Jong <f.jin@protonmail.com>"]
 description = "A Rust implementation of the txtar Go package"
@@ -9,6 +9,7 @@ readme = "README.md"
 repository = "https://github.com/foo-jin/txtar"
 categories = ["filesystem", "development-tools::testing"]
 keywords = ["fs", "filesystem", "txtar", "tempfs"]
+exclude = [".gitignore"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

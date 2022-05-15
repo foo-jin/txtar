@@ -3,7 +3,7 @@ A Rust implementation of the [txtar](https://github.com/golang/tools/tree/master
 
 ```toml
 [dependencies]
-txtar = 0.2.0
+txtar = 0.2.2
 ```
 
 ## Example

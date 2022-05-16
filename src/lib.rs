@@ -10,8 +10,9 @@ use std::{
     str,
 };
 
+use clean_path::Clean;
+
 pub use error::MaterializeError;
-use path_clean::PathClean;
 
 /**
 An archive represents a tree of text files.

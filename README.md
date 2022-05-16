@@ -1,11 +1,16 @@
 # txtar
+
+[![crates.io version][1]][2]
+[![docs.rs docs][3]][4]
+[![license][5]][6]
+
 A Rust implementation of the [txtar](https://github.com/golang/tools/tree/master/txtar) Go package.
 
-```
+```sh
 cargo add txtar
 ```
 
-## Example
+## Usage
 ```rust no_run
 let txt = "\
 comment1
@@ -56,3 +61,15 @@ The format spec as written in the `txtar` Go package source code:
 > parsers should consider a final newline to be present anyway.
 >
 > There are no possible syntax errors in a txtar archive.
+
+## License
+
+[MIT](./LICENSE-MIT) OR [Apache-2.0](./LICENSE-APACHE)
+
+
+[1]: https://img.shields.io/crates/v/txtar.svg?style=flat-square
+[2]: https://crates.io/crates/txtar
+[3]: https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square
+[4]: https://docs.rs/txtar
+[5]: https://img.shields.io/crates/l/txtar.svg?style=flat-square
+[6]: #license
